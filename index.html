@@ -162,12 +162,37 @@
             const qrCodeReader = new Html5Qrcode('qr-video');
             html5QrCode = qrCodeReader;
 
+            // Use facingMode: { exact: "environment"} to try and force back camera
+            const cameraConfig = { facingMode: { exact: "environment"} };
+
             try {
-                const cameras = await Html5Qrcode.getCameras();
-                if (cameras.length > 0) {
-                    const cameraId = cameras[0].id; // Use first camera
-                    qrCodeReader.start(
-                        cameraId,
+                // Try to start the back camera
+                await qrCodeReader.start(
+                    cameraConfig,
+                    { fps: 10, qrbox: { width: 250, height: 250 } },
+                    (decodedText, decodedResult) => {
+                        qrCodeValue = decodedText;
+                        scanResultDiv.textContent = `สแกนสำเร็จ: ${qrCodeValue}`;
+                        
+                        // Stop the scanner and show the form
+                        qrCodeReader.stop().then(() => {
+                            scannerContainer.classList.add('hidden');
+                            reportForm.classList.remove('hidden');
+                            displayQrcodeValue.textContent = qrCodeValue;
+                        }).catch(err => {
+                            console.error('Failed to stop scanner:', err);
+                        });
+                    },
+                    (errorMessage) => {
+                        // Scan error is normal during live scanning, do nothing
+                    }
+                );
+            } catch (err) {
+                // If back camera fails, try with any available camera
+                console.warn('Failed to start environment camera, trying with any available camera:', err);
+                try {
+                    await qrCodeReader.start(
+                        { facingMode: "user" }, // Fallback to user-facing or any camera
                         { fps: 10, qrbox: { width: 250, height: 250 } },
                         (decodedText, decodedResult) => {
                             qrCodeValue = decodedText;
@@ -186,12 +211,10 @@
                             // Scan error is normal during live scanning, do nothing
                         }
                     );
-                } else {
-                    displayMessage('ไม่พบกล้อง', 'error');
+                } catch (fallbackErr) {
+                    console.error('Failed to start any camera:', fallbackErr);
+                    displayMessage('ไม่สามารถเข้าถึงกล้องได้ โปรดอนุญาตการเข้าถึงหรือลองใช้เบราว์เซอร์อื่น', 'error');
                 }
-            } catch (err) {
-                console.error('Failed to start scanner:', err);
-                displayMessage('ไม่สามารถเข้าถึงกล้องได้ โปรดอนุญาตการเข้าถึง', 'error');
             }
         };
 
