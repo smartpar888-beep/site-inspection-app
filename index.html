@@ -102,7 +102,7 @@
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script>
         // API URL from Google Apps Script. You will replace this with your own URL.
-        const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxpnP5F0I6XKOfHQQwg6uykDC9f56H6wMqEkdcgkFZBL8NDRLAcjbGE7SFLowVPRArV/exec'; 
+        const GOOGLE_APPS_SCRIPT_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE'; 
         
         const startScanBtn = document.getElementById('start-scan');
         const initialMessage = document.getElementById('initial-message');
@@ -162,43 +162,29 @@
             const qrCodeReader = new Html5Qrcode('qr-video');
             html5QrCode = qrCodeReader;
 
-            // Use facingMode: { exact: "environment"} to try and force back camera
-            const cameraConfig = { facingMode: { exact: "environment"} };
+            // This configuration is more robust for iOS and Android
+            const config = { 
+                fps: 10, 
+                qrbox: { width: 250, height: 250 },
+                supportedScanFormats: [Html5QrcodeSupportedFormats.QR_CODE]
+            };
 
             try {
-                // Try to start the back camera
-                await qrCodeReader.start(
-                    cameraConfig,
-                    { fps: 10, qrbox: { width: 250, height: 250 } },
-                    (decodedText, decodedResult) => {
-                        qrCodeValue = decodedText;
-                        scanResultDiv.textContent = `สแกนสำเร็จ: ${qrCodeValue}`;
-                        
-                        // Stop the scanner and show the form
-                        qrCodeReader.stop().then(() => {
-                            scannerContainer.classList.add('hidden');
-                            reportForm.classList.remove('hidden');
-                            displayQrcodeValue.textContent = qrCodeValue;
-                        }).catch(err => {
-                            console.error('Failed to stop scanner:', err);
-                        });
-                    },
-                    (errorMessage) => {
-                        // Scan error is normal during live scanning, do nothing
-                    }
-                );
-            } catch (err) {
-                // If back camera fails, try with any available camera
-                console.warn('Failed to start environment camera, trying with any available camera:', err);
-                try {
+                // Get all available cameras
+                const devices = await Html5Qrcode.getCameras();
+                if (devices && devices.length) {
+                    // Try to find a back camera
+                    const backCamera = devices.find(device => device.label.toLowerCase().includes('back') || device.label.toLowerCase().includes('rear'));
+                    const cameraId = backCamera ? backCamera.id : devices[0].id; // Use back camera if found, otherwise use the first one
+
                     await qrCodeReader.start(
-                        { facingMode: "user" }, // Fallback to user-facing or any camera
-                        { fps: 10, qrbox: { width: 250, height: 250 } },
-                        (decodedText, decodedResult) => {
+                        cameraId,
+                        config,
+                        (decodedText) => {
+                            // On success
                             qrCodeValue = decodedText;
                             scanResultDiv.textContent = `สแกนสำเร็จ: ${qrCodeValue}`;
                             
-                            // Stop the scanner and show the form
                             qrCodeReader.stop().then(() => {
                                 scannerContainer.classList.add('hidden');
                                 reportForm.classList.remove('hidden');
@@ -208,13 +194,15 @@
                             });
                         },
                         (errorMessage) => {
-                            // Scan error is normal during live scanning, do nothing
+                            // On failure (normal during scan)
                         }
                     );
-                } catch (fallbackErr) {
-                    console.error('Failed to start any camera:', fallbackErr);
-                    displayMessage('ไม่สามารถเข้าถึงกล้องได้ โปรดอนุญาตการเข้าถึงหรือลองใช้เบราว์เซอร์อื่น', 'error');
+                } else {
+                    displayMessage('ไม่พบกล้องในอุปกรณ์', 'error');
                 }
+            } catch (err) {
+                console.error('Error starting camera:', err);
+                displayMessage('ไม่สามารถเข้าถึงกล้องได้ โปรดตรวจสอบการอนุญาต', 'error');
             }
         };
 
