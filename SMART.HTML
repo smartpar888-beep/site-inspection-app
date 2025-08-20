@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web App ตรวจพื้นที่</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        #video-container {
+            width: 100%;
+            padding-top: 56.25%; /* 16:9 Aspect Ratio */
+            position: relative;
+            background-color: black;
+        }
+        #qr-video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        #scan-area-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .scan-box {
+            width: 70%;
+            padding-top: 70%;
+            border: 2px solid white;
+            border-radius: 1rem;
+            box-shadow: 0 0 0 1000px rgba(0,0,0,0.5);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 1000px rgba(0,0,0,0.5); }
+            50% { box-shadow: 0 0 0 1000px rgba(0,0,0,0.7); }
+            100% { box-shadow: 0 0 0 1000px rgba(0,0,0,0.5); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4">
+
+    <div id="app" class="max-w-xl mx-auto bg-white p-6 rounded-2xl shadow-lg">
+        <h1 class="text-3xl font-bold text-center mb-6 text-gray-800">แอปตรวจพื้นที่</h1>
+
+        <div id="initial-message" class="text-center text-gray-600 mb-6">
+            <p>กรุณากดปุ่มเพื่อเริ่มสแกน QR Code</p>
+            <button id="start-scan" class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition duration-300">เริ่มสแกน</button>
+        </div>
+
+        <div id="scanner-container" class="hidden">
+            <div id="video-container" class="relative rounded-xl overflow-hidden mb-4">
+                <video id="qr-video" playsinline></video>
+                <div id="scan-area-overlay">
+                    <div class="scan-box"></div>
+                </div>
+            </div>
+            <div id="scan-result" class="text-center text-lg font-semibold text-gray-700 mb-4">กำลังรอการสแกน...</div>
+        </div>
+
+        <form id="report-form" class="hidden">
+            <div id="form-header" class="mb-4 text-center">
+                <h2 class="text-2xl font-bold text-gray-800">แบบฟอร์มรายงาน</h2>
+                <div id="display-qrcode-value" class="mt-2 text-xl font-semibold text-blue-600"></div>
+            </div>
+
+            <div class="mb-4">
+                <label for="id-input" class="block text-sm font-medium text-gray-700 mb-1">ID ผู้รายงาน</label>
+                <input type="text" id="id-input" class="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500" required>
+            </div>
+            
+            <div class="mb-4">
+                <label for="image-input" class="block text-sm font-medium text-gray-700 mb-1">รูปภาพ</label>
+                <input type="file" id="image-input" accept="image/*" class="w-full text-gray-700" required>
+            </div>
+            
+            <div class="mb-4">
+                <label for="report-input" class="block text-sm font-medium text-gray-700 mb-1">ข้อมูลรายงาน</label>
+                <textarea id="report-input" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-blue-500 focus:border-blue-500" required></textarea>
+            </div>
+
+            <button type="submit" id="submit-button" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-xl transition duration-300">
+                ส่งข้อมูล
+            </button>
+        </form>
+
+        <div id="status-message" class="mt-4 text-center p-4 rounded-xl hidden"></div>
+    </div>
+    
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <script>
+        // API URL from Google Apps Script. You will replace this with your own URL.
+        const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxpnP5F0I6XKOfHQQwg6uykDC9f56H6wMqEkdcgkFZBL8NDRLAcjbGE7SFLowVPRArV/exec'; 
+        
+        const startScanBtn = document.getElementById('start-scan');
+        const initialMessage = document.getElementById('initial-message');
+        const scannerContainer = document.getElementById('scanner-container');
+        const reportForm = document.getElementById('report-form');
+        const qrVideo = document.getElementById('qr-video');
+        const scanResultDiv = document.getElementById('scan-result');
+        const formHeader = document.getElementById('form-header');
+        const displayQrcodeValue = document.getElementById('display-qrcode-value');
+        const statusMessage = document.getElementById('status-message');
+        const submitButton = document.getElementById('submit-button');
+
+        let html5QrCode;
+        let qrCodeValue = '';
+        let userLatitude, userLongitude;
+        let isSubmitting = false;
+
+        // Function to get current GPS location
+        const getGeolocation = () => {
+            return new Promise((resolve, reject) => {
+                if ('geolocation' in navigator) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            resolve({
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude
+                            });
+                        },
+                        (error) => {
+                            console.error('Geolocation error:', error);
+                            reject('ไม่สามารถระบุตำแหน่ง GPS ได้');
+                        }
+                    );
+                } else {
+                    reject('เบราว์เซอร์ไม่รองรับ Geolocation');
+                }
+            });
+        };
+
+        const displayMessage = (message, type = 'success') => {
+            statusMessage.textContent = message;
+            statusMessage.classList.remove('hidden', 'bg-red-200', 'text-red-800', 'bg-green-200', 'text-green-800');
+            if (type === 'success') {
+                statusMessage.classList.add('bg-green-200', 'text-green-800');
+            } else {
+                statusMessage.classList.add('bg-red-200', 'text-red-800');
+            }
+            setTimeout(() => {
+                statusMessage.classList.add('hidden');
+            }, 5000);
+        };
+
+        const startScanning = async () => {
+            initialMessage.classList.add('hidden');
+            scannerContainer.classList.remove('hidden');
+
+            const qrCodeReader = new Html5Qrcode('qr-video');
+            html5QrCode = qrCodeReader;
+
+            try {
+                const cameras = await Html5Qrcode.getCameras();
+                if (cameras.length > 0) {
+                    const cameraId = cameras[0].id; // Use first camera
+                    qrCodeReader.start(
+                        cameraId,
+                        { fps: 10, qrbox: { width: 250, height: 250 } },
+                        (decodedText, decodedResult) => {
+                            qrCodeValue = decodedText;
+                            scanResultDiv.textContent = `สแกนสำเร็จ: ${qrCodeValue}`;
+                            
+                            // Stop the scanner and show the form
+                            qrCodeReader.stop().then(() => {
+                                scannerContainer.classList.add('hidden');
+                                reportForm.classList.remove('hidden');
+                                displayQrcodeValue.textContent = qrCodeValue;
+                            }).catch(err => {
+                                console.error('Failed to stop scanner:', err);
+                            });
+                        },
+                        (errorMessage) => {
+                            // Scan error is normal during live scanning, do nothing
+                        }
+                    );
+                } else {
+                    displayMessage('ไม่พบกล้อง', 'error');
+                }
+            } catch (err) {
+                console.error('Failed to start scanner:', err);
+                displayMessage('ไม่สามารถเข้าถึงกล้องได้ โปรดอนุญาตการเข้าถึง', 'error');
+            }
+        };
+
+        startScanBtn.addEventListener('click', startScanning);
+
+        reportForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (isSubmitting) return;
+
+            isSubmitting = true;
+            submitButton.textContent = 'กำลังส่ง...';
+            submitButton.disabled = true;
+
+            const id = document.getElementById('id-input').value;
+            const report = document.getElementById('report-input').value;
+            const imageFile = document.getElementById('image-input').files[0];
+
+            if (!imageFile) {
+                displayMessage('กรุณาเลือกรูปภาพ', 'error');
+                isSubmitting = false;
+                submitButton.textContent = 'ส่งข้อมูล';
+                submitButton.disabled = false;
+                return;
+            }
+
+            try {
+                // Get geolocation
+                const coords = await getGeolocation();
+                userLatitude = coords.latitude;
+                userLongitude = coords.longitude;
+
+                // Create FormData to send all data including file
+                const formData = new FormData();
+                formData.append('id', id);
+                formData.append('qrcodeValue', qrCodeValue);
+                formData.append('latitude', userLatitude);
+                formData.append('longitude', userLongitude);
+                formData.append('report', report);
+                formData.append('image', imageFile);
+
+                const response = await fetch(GOOGLE_APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    displayMessage('ส่งข้อมูลสำเร็จแล้ว', 'success');
+                    reportForm.reset();
+                    reportForm.classList.add('hidden');
+                    initialMessage.classList.remove('hidden');
+                    qrCodeValue = '';
+                    userLatitude = null;
+                    userLongitude = null;
+                } else {
+                    displayMessage(`เกิดข้อผิดพลาด: ${result.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Error during submission:', error);
+                displayMessage('เกิดข้อผิดพลาดในการส่งข้อมูล', 'error');
+            } finally {
+                isSubmitting = false;
+                submitButton.textContent = 'ส่งข้อมูล';
+                submitButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
